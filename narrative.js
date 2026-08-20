@@ -51,8 +51,7 @@ function setCopy(element, opacity, parallax = 0) {
 }
 
 function getProgress() {
-  const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
-  return clamp(window.scrollY / maxScroll);
+  return clamp(window.__visualProgress || 0);
 }
 
 function beatFor(progress) {
@@ -120,6 +119,7 @@ function requestRender() {
 }
 
 window.addEventListener('scroll', requestRender, { passive: true });
+window.addEventListener('filmprogress', requestRender);
 window.addEventListener('resize', requestRender);
 window.addEventListener('scrollfilmready', () => {
   filmIsReady = true;

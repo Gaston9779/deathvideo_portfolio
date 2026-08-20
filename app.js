@@ -3,42 +3,55 @@ const SCROLL_DISTANCE = 8000;
 const FRAME_PATH = './public/frames/frame-';
 const FRAME_EXTENSION = '.jpg';
 
+const NETWORK_CONCURRENCY = 8;
+const NETWORK_RETRIES = 2;
+const INITIAL_DECODE_COUNT = 36;
 const SMOOTHING_PER_SECOND = 18;
 const DPR_CAP = 2;
-const PRELOAD_RADIUS = 12;
+const PRELOAD_RADIUS = 16;
 const LOOK_AHEAD = 8;
-const MAX_DECODED_FRAMES = 36;
-const MAX_CONCURRENT_LOADS = 4;
+const MAX_DECODED_FRAMES = 48;
+const MAX_CONCURRENT_DECODES = 4;
 
 const canvas = document.querySelector('#film-canvas');
 const context = canvas.getContext('2d', { alpha: false, desynchronized: true });
 const debugPanel = document.querySelector('#debug-panel');
+const loader = document.querySelector('#film-loader');
+const loaderProgress = document.querySelector('[data-loader-progress]');
+const loaderLine = document.querySelector('[data-loader-line]');
 const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 const params = new URLSearchParams(window.location.search);
 const debugEnabled = params.get('debug') === '1';
 
 window.__ready = false;
+window.__visualProgress = 0;
 
 const cache = new Map();
-const pending = new Set();
-const queue = [];
-let activeLoads = 0;
+const decodePending = new Map();
+const decodeQueue = [];
+const networkLoaded = new Set();
+let activeDecodes = 0;
+let loadedFrames = 0;
+let loaderState = 'LOADING';
+let isReady = false;
 let playhead = 0;
 let targetFrame = 0;
 let renderedFrame = -1;
-let lastValidFrame = -1;
-let lastScrollY = window.scrollY;
+let lastScrollY = 0;
 let scrollDirection = 1;
 let rafId = 0;
 let lastRafTime = 0;
 let measuredFps = 0;
 let fpsSampleStart = performance.now();
 let fpsSampleFrames = 0;
-let hasDrawnFirstFrame = false;
 let canvasWidth = 0;
 let canvasHeight = 0;
-let devicePixelRatio = 1;
-let idlePreloadCursor = 13;
+
+const blockedScrollKeys = new Set([' ', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End']);
+
+function blockInteraction(event) {
+  if (event.type !== 'keydown' || blockedScrollKeys.has(event.key)) event.preventDefault();
+}
 
 function frameUrl(index) {
   return `${FRAME_PATH}${String(index + 1).padStart(4, '0')}${FRAME_EXTENSION}`;
@@ -52,91 +65,128 @@ function maxScroll() {
   return Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
 }
 
-function updateTargetFromScroll() {
-  const scrollY = window.scrollY;
-  scrollDirection = scrollY === lastScrollY ? scrollDirection : Math.sign(scrollY - lastScrollY);
-  lastScrollY = scrollY;
-  const progress = clamp(scrollY / maxScroll(), 0, 1);
-  targetFrame = progress * (FRAME_COUNT - 1);
-  queueAround(targetFrame);
-  requestTick();
+function updateLoader() {
+  const percent = Math.round((loadedFrames / FRAME_COUNT) * 100);
+  loaderProgress.textContent = `${percent}%`;
+  loaderLine.style.width = `${percent}%`;
+}
+
+async function downloadFrame(index) {
+  let lastError;
+  for (let attempt = 0; attempt <= NETWORK_RETRIES; attempt += 1) {
+    try {
+      const response = await fetch(frameUrl(index), { cache: 'force-cache' });
+      if (!response.ok) throw new Error(`Frame ${index + 1} unavailable (${response.status})`);
+      await response.blob();
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < NETWORK_RETRIES) {
+        await new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError;
+}
+
+async function preloadNetwork() {
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < FRAME_COUNT) {
+      const index = nextIndex;
+      nextIndex += 1;
+      await downloadFrame(index);
+      networkLoaded.add(index);
+      loadedFrames = networkLoaded.size;
+      updateLoader();
+    }
+  }
+  await Promise.all(Array.from({ length: NETWORK_CONCURRENCY }, worker));
 }
 
 function resizeCanvas() {
-  devicePixelRatio = Math.min(window.devicePixelRatio || 1, DPR_CAP);
-  canvasWidth = Math.max(1, Math.round(window.innerWidth * devicePixelRatio));
-  canvasHeight = Math.max(1, Math.round(window.innerHeight * devicePixelRatio));
+  const dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP);
+  canvasWidth = Math.max(1, Math.round(window.innerWidth * dpr));
+  canvasHeight = Math.max(1, Math.round(window.innerHeight * dpr));
   if (canvas.width !== canvasWidth || canvas.height !== canvasHeight) {
     canvas.width = canvasWidth;
     canvas.height = canvasHeight;
   }
-  drawBestAvailableFrame(Math.round(playhead));
-  requestTick();
+  if (renderedFrame >= 0) drawBestAvailableFrame(Math.round(playhead));
 }
 
-function enqueue(index, priority = false) {
-  if (index < 0 || index >= FRAME_COUNT || cache.has(index) || pending.has(index)) return;
-  pending.add(index);
-  if (priority) queue.unshift(index);
-  else queue.push(index);
-  pumpQueue();
-}
-
-function queueAround(frame) {
-  const center = clamp(Math.round(frame), 0, FRAME_COUNT - 1);
-  enqueue(center, true);
-  for (let offset = 1; offset <= PRELOAD_RADIUS; offset += 1) {
-    enqueue(center + offset * scrollDirection, true);
-    enqueue(center - offset * scrollDirection);
+async function decodeFrame(index) {
+  if ('createImageBitmap' in window) {
+    const response = await fetch(frameUrl(index), { cache: 'force-cache' });
+    if (!response.ok) throw new Error(`Frame ${index + 1} unavailable`);
+    return createImageBitmap(await response.blob());
   }
-  for (let offset = PRELOAD_RADIUS + 1; offset <= PRELOAD_RADIUS + LOOK_AHEAD; offset += 1) {
-    enqueue(center + offset * scrollDirection, true);
-  }
+
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.decoding = 'async';
+    image.onload = async () => {
+      try {
+        if (image.decode) await image.decode();
+        resolve(image);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    image.onerror = reject;
+    image.src = frameUrl(index);
+  });
 }
 
-function pumpQueue() {
-  while (activeLoads < MAX_CONCURRENT_LOADS && queue.length > 0) {
-    const index = queue.shift();
-    if (!pending.has(index) || cache.has(index)) continue;
-    activeLoads += 1;
-    loadFrame(index)
-      .catch(() => {
-        // A missing frame must never clear the last valid canvas image.
+function requestDecode(index, priority = false) {
+  if (index < 0 || index >= FRAME_COUNT || cache.has(index)) return Promise.resolve();
+  if (decodePending.has(index)) return decodePending.get(index).promise;
+
+  let resolveJob;
+  let rejectJob;
+  const promise = new Promise((resolve, reject) => {
+    resolveJob = resolve;
+    rejectJob = reject;
+  });
+  decodePending.set(index, { promise, resolve: resolveJob, reject: rejectJob });
+  if (priority) decodeQueue.unshift(index);
+  else decodeQueue.push(index);
+  pumpDecodeQueue();
+  return promise;
+}
+
+function pumpDecodeQueue() {
+  while (activeDecodes < MAX_CONCURRENT_DECODES && decodeQueue.length) {
+    const index = decodeQueue.shift();
+    const pending = decodePending.get(index);
+    if (!pending || cache.has(index)) continue;
+    activeDecodes += 1;
+    decodeFrame(index)
+      .then((asset) => {
+        cache.set(index, { asset, lastUsed: performance.now() });
+        trimCache();
+        pending.resolve();
+        if (isReady) requestTick();
       })
+      .catch((error) => pending.reject(error))
       .finally(() => {
-        pending.delete(index);
-        activeLoads -= 1;
-        pumpQueue();
+        decodePending.delete(index);
+        activeDecodes -= 1;
+        pumpDecodeQueue();
       });
   }
 }
 
-async function loadFrame(index) {
-  let asset;
-  if ('createImageBitmap' in window) {
-    const response = await fetch(frameUrl(index), { cache: 'force-cache' });
-    if (!response.ok) throw new Error(`Frame ${index + 1} unavailable`);
-    asset = await createImageBitmap(await response.blob());
-  } else {
-    asset = await new Promise((resolve, reject) => {
-      const image = new Image();
-      image.decoding = 'async';
-      image.onload = async () => {
-        try {
-          if (image.decode) await image.decode();
-          resolve(image);
-        } catch (error) {
-          reject(error);
-        }
-      };
-      image.onerror = reject;
-      image.src = frameUrl(index);
-    });
+function queueAround(frame) {
+  const center = clamp(Math.round(frame), 0, FRAME_COUNT - 1);
+  requestDecode(center, true);
+  for (let offset = 1; offset <= PRELOAD_RADIUS; offset += 1) {
+    requestDecode(center + offset * scrollDirection, true);
+    requestDecode(center - offset * scrollDirection);
   }
-
-  cache.set(index, { asset, lastUsed: performance.now() });
-  trimCache();
-  if (index === 0 || Math.abs(index - Math.round(playhead)) <= 1) requestTick();
+  for (let offset = PRELOAD_RADIUS + 1; offset <= PRELOAD_RADIUS + LOOK_AHEAD; offset += 1) {
+    requestDecode(center + offset * scrollDirection, true);
+  }
 }
 
 function trimCache() {
@@ -155,14 +205,10 @@ function trimCache() {
 }
 
 function drawCover(asset) {
-  const sourceWidth = asset.width;
-  const sourceHeight = asset.height;
-  const scale = Math.max(canvasWidth / sourceWidth, canvasHeight / sourceHeight);
-  const drawWidth = sourceWidth * scale;
-  const drawHeight = sourceHeight * scale;
-  const drawX = (canvasWidth - drawWidth) / 2;
-  const drawY = (canvasHeight - drawHeight) / 2;
-  context.drawImage(asset, drawX, drawY, drawWidth, drawHeight);
+  const scale = Math.max(canvasWidth / asset.width, canvasHeight / asset.height);
+  const drawWidth = asset.width * scale;
+  const drawHeight = asset.height * scale;
+  context.drawImage(asset, (canvasWidth - drawWidth) / 2, (canvasHeight - drawHeight) / 2, drawWidth, drawHeight);
 }
 
 function drawBestAvailableFrame(preferredIndex) {
@@ -188,21 +234,32 @@ function drawBestAvailableFrame(preferredIndex) {
   entry.lastUsed = performance.now();
   drawCover(entry.asset);
   renderedFrame = selectedIndex;
-  lastValidFrame = selectedIndex;
+  window.__visualProgress = selectedIndex / (FRAME_COUNT - 1);
+  window.dispatchEvent(new Event('filmprogress'));
   return true;
+}
+
+function updateTargetFromScroll() {
+  if (!isReady) return;
+  const scrollY = window.scrollY;
+  scrollDirection = scrollY === lastScrollY ? scrollDirection : Math.sign(scrollY - lastScrollY);
+  lastScrollY = scrollY;
+  targetFrame = clamp(scrollY / maxScroll(), 0, 1) * (FRAME_COUNT - 1);
+  queueAround(targetFrame);
+  requestTick();
 }
 
 function updateDebug() {
   if (!debugEnabled) return;
-  const progress = clamp(window.scrollY / maxScroll(), 0, 1);
   const narrativeDebug = window.__narrativeDebug;
   debugPanel.textContent = [
-    `scrollY       ${Math.round(window.scrollY)}`,
-    `progress      ${progress.toFixed(4)}`,
-    `targetFrame   ${targetFrame.toFixed(2)}`,
-    `renderedFrame ${renderedFrame + 1}`,
-    `render FPS    ${measuredFps.toFixed(1)}`,
-    `cache size    ${cache.size}`,
+    `NETWORK_LOADED  ${loadedFrames} / ${FRAME_COUNT}`,
+    `NETWORK_PERCENT ${Math.round((loadedFrames / FRAME_COUNT) * 100)}%`,
+    `LOADER_STATE    ${loaderState}`,
+    `TARGET_FRAME    ${targetFrame.toFixed(2)}`,
+    `RENDERED_FRAME  ${renderedFrame + 1}`,
+    `BITMAP_CACHE    ${cache.size} / ${MAX_DECODED_FRAMES}`,
+    `render FPS      ${measuredFps.toFixed(1)}`,
     ...(narrativeDebug
       ? [
           `CURRENT_BEAT  ${narrativeDebug.currentBeat}`,
@@ -214,23 +271,19 @@ function updateDebug() {
 }
 
 function requestTick() {
-  if (!rafId) rafId = requestAnimationFrame(tick);
+  if (isReady && !rafId) rafId = requestAnimationFrame(tick);
 }
 
 function tick(now) {
   rafId = 0;
   const elapsed = lastRafTime ? Math.min((now - lastRafTime) / 1000, 0.1) : 1 / 60;
   lastRafTime = now;
-  const target = targetFrame;
-  const motionReduced = reducedMotionQuery.matches;
-  const alpha = motionReduced ? 1 : 1 - Math.exp(-SMOOTHING_PER_SECOND * elapsed);
-  playhead += (target - playhead) * alpha;
-  if (Math.abs(target - playhead) < 0.01) playhead = target;
+  const alpha = reducedMotionQuery.matches ? 1 : 1 - Math.exp(-SMOOTHING_PER_SECOND * elapsed);
+  playhead += (targetFrame - playhead) * alpha;
+  if (Math.abs(targetFrame - playhead) < 0.01) playhead = targetFrame;
 
-  const desiredIndex = clamp(Math.round(playhead), 0, FRAME_COUNT - 1);
-  drawBestAvailableFrame(desiredIndex);
+  drawBestAvailableFrame(Math.round(playhead));
   queueAround(playhead);
-
   fpsSampleFrames += 1;
   if (now - fpsSampleStart >= 500) {
     measuredFps = (fpsSampleFrames * 1000) / (now - fpsSampleStart);
@@ -238,18 +291,11 @@ function tick(now) {
     fpsSampleStart = now;
   }
   updateDebug();
+  if (Math.abs(targetFrame - playhead) >= 0.01 || !cache.has(Math.round(playhead)) || debugEnabled) requestTick();
+}
 
-  if (!hasDrawnFirstFrame && lastValidFrame === 0) {
-    hasDrawnFirstFrame = true;
-    canvas.classList.add('is-ready');
-    window.__ready = true;
-    window.dispatchEvent(new Event('scrollfilmready'));
-    applyJumpParameter();
-  }
-
-  if (Math.abs(targetFrame - playhead) >= 0.01 || !cache.has(desiredIndex) || debugEnabled) {
-    requestTick();
-  }
+function setupScrollSpace() {
+  document.body.style.height = `${window.innerHeight + SCROLL_DISTANCE}px`;
 }
 
 function applyJumpParameter() {
@@ -259,46 +305,52 @@ function applyJumpParameter() {
   updateTargetFromScroll();
 }
 
-function setupScrollSpace() {
-  document.body.style.height = `${window.innerHeight + SCROLL_DISTANCE}px`;
-}
-
-function scheduleIdlePreload() {
-  if (idlePreloadCursor >= FRAME_COUNT) return;
-  const schedule = window.requestIdleCallback
-    ? window.requestIdleCallback.bind(window)
-    : (callback) => window.setTimeout(() => callback({ timeRemaining: () => 0 }), 750);
-
-  schedule((deadline) => {
-    let queued = 0;
-    while (
-      idlePreloadCursor < FRAME_COUNT &&
-      queued < 2 &&
-      (queued === 0 || deadline.timeRemaining() > 3)
-    ) {
-      enqueue(idlePreloadCursor);
-      idlePreloadCursor += 1;
-      queued += 1;
-    }
-    scheduleIdlePreload();
-  });
-}
-
-function initialize() {
-  setupScrollSpace();
+async function finishLoading() {
   resizeCanvas();
+  await Promise.all(Array.from({ length: INITIAL_DECODE_COUNT }, (_, index) => requestDecode(index, true)));
+  playhead = 0;
+  targetFrame = 0;
+  if (!drawBestAvailableFrame(0)) throw new Error('Initial frame could not be rendered');
+
+  window.scrollTo({ top: 0, behavior: 'auto' });
+  setupScrollSpace();
+  lastScrollY = 0;
+  loaderState = 'READY';
+  isReady = true;
+  canvas.classList.add('is-ready');
+  window.__ready = true;
+  window.dispatchEvent(new Event('scrollfilmready'));
+  window.dispatchEvent(new Event('filmprogress'));
+  document.body.classList.remove('film-is-loading');
+  loader.classList.add('is-hidden');
+  window.removeEventListener('wheel', blockInteraction, { capture: true });
+  window.removeEventListener('touchmove', blockInteraction, { capture: true });
+  window.removeEventListener('keydown', blockInteraction, { capture: true });
+  applyJumpParameter();
+  updateDebug();
+}
+
+async function initialize() {
+  window.addEventListener('wheel', blockInteraction, { passive: false, capture: true });
+  window.addEventListener('touchmove', blockInteraction, { passive: false, capture: true });
+  window.addEventListener('keydown', blockInteraction, { capture: true });
   if (debugEnabled) debugPanel.hidden = false;
   window.addEventListener('scroll', updateTargetFromScroll, { passive: true });
   window.addEventListener('resize', () => {
+    if (!isReady) return resizeCanvas();
     setupScrollSpace();
     resizeCanvas();
     updateTargetFromScroll();
   });
   reducedMotionQuery.addEventListener?.('change', requestTick);
-  enqueue(0, true);
-  for (let index = 1; index <= 12; index += 1) enqueue(index);
-  scheduleIdlePreload();
-  updateTargetFromScroll();
+
+  try {
+    await preloadNetwork();
+    await finishLoading();
+  } catch (error) {
+    loaderProgress.textContent = 'RETRY';
+    console.error('Unable to preload the MEMORY / LIE frame sequence.', error);
+  }
 }
 
 initialize();

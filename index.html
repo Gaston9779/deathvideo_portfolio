@@ -27,7 +27,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
+  <body class="film-is-loading">
     <canvas id="film-canvas" aria-label="Film controllato dallo scroll"></canvas>
     <div class="film-effect film-grain" aria-hidden="true"></div>
     <div class="film-effect film-vignette" aria-hidden="true"></div>
@@ -88,6 +88,12 @@
         <p class="microcopy microcopy--final" data-copy="final-detail">DON'T LET AN ALGORITHM<br />REMEMBER FOR YOU.</p>
       </section>
     </div>
+    <section id="film-loader" aria-live="polite" aria-label="Caricamento film">
+      <p class="film-loader__title">MEMORY / LIE</p>
+      <p class="film-loader__label">LOADING MEMORY</p>
+      <p class="film-loader__progress" data-loader-progress>0%</p>
+      <i class="film-loader__line" aria-hidden="true"><b data-loader-line></b></i>
+    </section>
     <output id="debug-panel" hidden aria-live="off"></output>
     <script type="module" src="./app.js"></script>
     <script type="module" src="./narrative.js"></script>

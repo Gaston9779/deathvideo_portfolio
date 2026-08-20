@@ -15,6 +15,11 @@ body {
   overflow-x: hidden;
 }
 
+body.film-is-loading {
+  height: 100vh;
+  overflow: hidden;
+}
+
 #film-canvas {
   position: fixed;
   inset: 0;
@@ -70,6 +75,66 @@ body {
   z-index: 2;
   color: #f4f0e8;
   text-rendering: optimizeLegibility;
+}
+
+#film-loader {
+  position: fixed;
+  z-index: 4;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 14px;
+  background: #030303;
+  color: #f4f0e8;
+  opacity: 1;
+  transition: opacity 360ms ease;
+}
+
+#film-loader.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.film-loader__title,
+.film-loader__label,
+.film-loader__progress {
+  margin: 0;
+}
+
+.film-loader__title {
+  font-family: 'Instrument Serif', 'Iowan Old Style', Baskerville, Georgia, serif;
+  font-size: clamp(44px, 5.4vw, 92px);
+  font-weight: 400;
+  letter-spacing: -0.045em;
+  line-height: 0.88;
+}
+
+.film-loader__label,
+.film-loader__progress {
+  font-size: clamp(9px, 0.67vw, 12px);
+  font-weight: 500;
+  letter-spacing: 0.17em;
+}
+
+.film-loader__label {
+  margin-top: 20px;
+}
+
+.film-loader__line {
+  display: block;
+  width: min(180px, 28vw);
+  height: 1px;
+  overflow: hidden;
+  background: rgba(244, 240, 232, 0.28);
+}
+
+.film-loader__line b {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: #f4f0e8;
+  transition: width 120ms linear;
 }
 
 .copy,
@@ -264,7 +329,9 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   #film-canvas,
-  .film-wash {
+  .film-wash,
+  #film-loader,
+  .film-loader__line b {
     transition: none;
   }
 }

@@ -1,0 +1,24 @@
+# Runtime frame sequence: intentionally tracked.
+!public/
+!public/frames/
+!public/frames/frame-*.jpg
+
+# Source media and post-production artefacts.
+/raw/
+/build/
+/reports/
+
+# Local development and operating-system files.
+/node_modules/
+.DS_Store
+**/.DS_Store
+.env
+.env.*
+!.env.example
+.cache/
+.netlify/
+coverage/
+
+# Project-internal handoff notes; not required by the deployed site.
+/AGENTS.md
+/BRIEF.md

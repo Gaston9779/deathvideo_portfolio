@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#000000" />
+    <meta
+      name="description"
+      content="An interactive scroll-film exploring memory, artificial intelligence and the moment restoration becomes reinvention."
+    />
+    <meta property="og:title" content="MEMORY / LIE — Interactive Film" />
+    <meta
+      property="og:description"
+      content="An interactive scroll-film exploring memory, artificial intelligence and the moment restoration becomes reinvention."
+    />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="MEMORY / LIE — Interactive Film" />
+    <meta
+      name="twitter:description"
+      content="An interactive scroll-film exploring memory, artificial intelligence and the moment restoration becomes reinvention."
+    />
+    <title>MEMORY / LIE — Interactive Film</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <canvas id="film-canvas" aria-label="Film controllato dallo scroll"></canvas>
+    <div class="film-effect film-grain" aria-hidden="true"></div>
+    <div class="film-effect film-vignette" aria-hidden="true"></div>
+    <div class="film-effect film-wash film-wash--warm" aria-hidden="true"></div>
+    <div class="film-effect film-wash film-wash--cold" aria-hidden="true"></div>
+    <div id="narrative" aria-live="off">
+      <section class="copy copy--opening copy--left" data-copy="opening">
+        <p class="eyebrow">MEMORY / 01</p>
+        <h1 class="display display--opening">
+          <span>THIS IS ALL</span>
+          <span>I HAVE LEFT.</span>
+        </h1>
+        <div class="scroll-cue" data-copy="scroll-cue">
+          <span>SCROLL TO RESTORE</span>
+          <i><b></b></i>
+        </div>
+      </section>
+
+      <aside class="restoration" data-copy="restoration">
+        <span class="restoration__label" data-restoration-label>RESTORING MEMORY</span>
+        <span class="restoration__value" data-restoration-value>0%</span>
+        <i class="restoration__line"><b data-restoration-line></b></i>
+      </aside>
+
+      <section class="copy copy--archive copy--left" data-copy="archive">
+        <h2 class="display">
+          <span>I ASKED IT</span>
+          <span>TO REMEMBER YOU.</span>
+        </h2>
+        <p class="microcopy" data-copy="archive-detail">IT HAD NEVER MET YOU.</p>
+      </section>
+
+      <section class="copy copy--portrait copy--left" data-copy="portrait">
+        <h2 class="display">
+          <span>NOW YOU LOOK</span>
+          <span><em>PERFECT.</em></span>
+        </h2>
+      </section>
+
+      <section class="copy copy--question copy--left" data-copy="question">
+        <h2 class="display">
+          <span>BUT WHO</span>
+          <span>ARE YOU?</span>
+        </h2>
+      </section>
+
+      <section class="copy copy--grave copy--left" data-copy="grave">
+        <p class="microcopy" data-copy="grave-detail">MEMORY RESTORED.</p>
+        <h2 class="display display--grave" data-copy="replaced">OR REPLACED?</h2>
+      </section>
+
+      <section class="copy copy--final copy--left" data-copy="final">
+        <h2 class="display display--final">
+          <span data-copy="final-line-1">WHEN DOES</span>
+          <span data-copy="final-line-2">A MEMORY</span>
+          <span data-copy="final-line-3">BECOME A LIE?</span>
+        </h2>
+        <p class="microcopy microcopy--final" data-copy="final-detail">DON'T LET AN ALGORITHM<br />REMEMBER FOR YOU.</p>
+      </section>
+    </div>
+    <output id="debug-panel" hidden aria-live="off"></output>
+    <script type="module" src="./app.js"></script>
+    <script type="module" src="./narrative.js"></script>
+  </body>
+</html>

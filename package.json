@@ -1,0 +1,8 @@
+{
+  "name": "deathvideo-scroll-film-poc",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "start": "python3 -m http.server 4173 --bind 127.0.0.1"
+  }
+}

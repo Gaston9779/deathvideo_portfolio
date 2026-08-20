@@ -349,7 +349,7 @@ async function initialize() {
     await finishLoading();
   } catch (error) {
     loaderProgress.textContent = 'RETRY';
-    console.error('Unable to preload the MEMORY / LIE frame sequence.', error);
+    console.error('Unable to preload the MEMORY IS AN IMPERFECT IMAGE frame sequence.', error);
   }
 }
 

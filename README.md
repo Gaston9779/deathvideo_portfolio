@@ -1,4 +1,4 @@
-# MEMORY / LIE
+# MEMORY IS AN IMPERFECT IMAGE
 
 An interactive scroll-film about memory and AI-generated reconstruction.
 
